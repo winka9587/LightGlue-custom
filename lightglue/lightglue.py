@@ -317,7 +317,7 @@ class LightGlue(nn.Module):
         "add_scale_ori": False,
         "n_layers": 9,
         "num_heads": 4,
-        "flash": True,  # enable FlashAttention if available.
+        "flash": True,  # enable FlashAttention if available. what is flash-attn
         "mp": False,  # enable mixed precision
         "depth_confidence": 0.95,  # early stopping, disable with -1
         "width_confidence": 0.99,  # point pruning, disable with -1
