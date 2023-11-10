@@ -37,6 +37,8 @@ import argparse
 import cv2
 import matplotlib.cm as cm
 import torch
+from homo import Homo_Projector
+import numpy as np
 
 # 引入LightGlue相关的类和函数
 from lightglue import LightGlue, SuperPoint, DISK, SIFT, ALIKED
@@ -97,6 +99,17 @@ if __name__ == '__main__':
     parser.add_argument(
         '--force_cpu', action='store_true',
         help='Force pytorch to run in CPU mode.')
+    
+    parser.add_argument(
+        '--homo', action='store_true',
+        help='project image0 to image1')
+    
+    # use mask img or video
+    parser.add_argument(
+        '--mask_folder', 
+        type=str, 
+        default='/data4/cxx/dataset/desk_mask',
+        help='Only match keypoints in the mask area')
 
     opt = parser.parse_args()
     print(opt)
@@ -121,10 +134,28 @@ if __name__ == '__main__':
     # last_data = {'keypoints0': last_data['keypoints'], 'descriptors0': last_data['descriptors']}
     # last_data['image0'] = frame_tensor
     last_frame = frame
+    frame, ret = vs.next_frame()
     last_image_id = 0
+
+    """
+    color intrinsics is:  [ 640x480  p[326.371 243.675]  f[384.918 383.909]  Inverse Brown Conrady [-0.0535972 0.062711 -0.00110631 6.81885e-05 -0.0201631] ]
+    depth intrinsics is:  [ 640x480  p[321.701 239.973]  f[389.702 389.702]  Brown Conrady [0 0 0 0 0] ]
+    """
+    fx = 384.918
+    fy = 383.909
+    cx = 326.371
+    cy = 243.675
+    K0 = np.array([[fx, 0, cx],
+                  [0, fy, cy],
+                  [0, 0, 1]])
+    K1 = np.array([[fx, 0, cx],
+                  [0, fy, cy],
+                  [0, 0, 1]])
 
     # ...
     timer = AverageTimer()
+    if opt.homo:
+        hpr = Homo_Projector()
     while True:
         frame, ret = vs.next_frame()
         if not ret:
@@ -159,7 +190,7 @@ if __name__ == '__main__':
         mkpts1 = kpts1[matches[valid]]
         color = cm.jet(confidence[valid])
         text = [
-            'SuperGlue',
+            'LightGlue',
             'Keypoints: {}:{}'.format(len(kpts0), len(kpts1)),
             'Matches: {}'.format(len(mkpts0))
         ]
@@ -173,9 +204,14 @@ if __name__ == '__main__':
         out = make_matching_plot_fast(
             last_frame, frame, kpts0, kpts1, mkpts0, mkpts1, color, text,
             path=None, show_keypoints=opt.show_keypoints, small_text=small_text)
+        
+        if opt.homo:
+            # last_frame, frame, mkpts0, mkpts1, K0, K1, concat_img, thresh=1., conf=0.99999
+            out = hpr(last_frame, frame, mkpts0, mkpts1, K0, K1, out)
 
-        if not opt.no_display:
-            cv2.imshow('SuperGlue matches', out)
+        if not opt.no_display:            
+            cv2.imshow('LightGlue matches', out)
+            
             key = chr(cv2.waitKey(1) & 0xFF)
             if key == 'q':
                 vs.cleanup()

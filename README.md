@@ -22,6 +22,13 @@
     <em>LightGlue is a deep neural network that matches sparse local features across image pairs.<br>An adaptive mechanism makes it fast for easy pairs (top) and reduces the computational complexity for difficult ones (bottom).</em>
 </p>
 
+
+## TODO List
+- [x] lightglue match visualize.
+- [ ] visualize homography project.
+- [ ] accept depth input and estimate relative pose.
+- [ ] accept Tracking-Anything mask input, and only use keypoints in mask region.
+
 ##
 
 This repository hosts the inference code of LightGlue, a lightweight feature matcher with high accuracy and blazing fast inference. It takes as input a set of keypoints and descriptors for each image and returns the indices of corresponding points. The architecture is based on adaptive pruning techniques, in both network width and depth - [check out the paper for more details](https://arxiv.org/pdf/2306.13643.pdf).

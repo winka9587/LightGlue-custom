@@ -1,0 +1,19 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python: Current File",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",  // 入口文件, file是指当前文件
+            "console": "integratedTerminal",
+            "justMyCode": true,  // 不会包含lib文件, 仅自己编写的代码
+            "python": "/home/cxx/App/anaconda3/envs/lightglue/bin/python",
+            "args": ["--input", "/data4/cxx/dataset/desk_3/depth/", ]  //"args": ["--quiet", "--norepeat", "--port", "1593"],
+
+        }
+    ]
+}

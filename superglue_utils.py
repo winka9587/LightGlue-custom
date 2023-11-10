@@ -283,8 +283,6 @@ def read_image(path, device, resize, rotation, resize_float):
 
 
 # --- GEOMETRY ---
-
-
 def estimate_pose(kpts0, kpts1, K0, K1, thresh, conf=0.99999):
     if len(kpts0) < 5:
         return None
