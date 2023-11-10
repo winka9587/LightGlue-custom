@@ -25,7 +25,7 @@
 
 ## TODO List
 - [x] lightglue match visualize.
-- [ ] visualize homography project.
+- [x] visualize homography project.
 - [ ] accept depth input and estimate relative pose.
 - [ ] accept Tracking-Anything mask input, and only use keypoints in mask region.
 

@@ -48,6 +48,29 @@ from superglue_utils import (AverageTimer, VideoStreamer,
 
 torch.set_grad_enabled(False)
 
+
+# 读取不定长的输入input，用于初始化与输入同样数量的VideoStreamer
+# BEGIN: 7f0d3m5x8z9a
+class VideoStreamerCollect:
+    def __init__(self, inputs, labels, vs_opt):
+        assert len(inputs) == len(labels)
+        vs_dict = {labels[i]: VideoStreamer(input_src, vs_opt.resize, vs_opt.skip,
+                            vs_opt.image_glob, vs_opt.max_length) for i, input_src in enumerate(inputs)}
+        self.vs_collection = vs_dict
+        
+    def next_frame(self):
+        frame_collect = {}
+        ret_collect = {}
+        for label, vs in self.vs_collection.items():
+            frame, ret = vs.next_frame()
+            frame_collect[label] = frame
+            ret_collect[label] = ret
+        return frame_collect, ret_collect
+    
+    def get_i(self):
+        return {label: vs.i for label, vs in self.vs_collection.items()}
+
+# END: 7f0d3m5x8z9a
 # ...
 
 if __name__ == '__main__':
@@ -56,6 +79,10 @@ if __name__ == '__main__':
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument(
         '--input', type=str, default='/data4/cxx/dataset/desk.mp4',
+        help='ID of a USB webcam, URL of an IP camera, '
+             'or path to an image directory or movie file. default=\'0\' use camera')
+    parser.add_argument(
+        '--input_depth', type=str, default='default',
         help='ID of a USB webcam, URL of an IP camera, '
              'or path to an image directory or movie file. default=\'0\' use camera')
     parser.add_argument(
@@ -127,6 +154,14 @@ if __name__ == '__main__':
                        opt.image_glob, opt.max_length)
     frame, ret = vs.next_frame()
     assert ret, 'Error when reading the first frame (try different --input?)'
+    
+        # use default depth folder
+    if opt.input_depth == 'default':
+        depth_path = opt.input.replace('color', 'depth')
+        vs_depth = VideoStreamer(depth_path, opt.resize, opt.skip,
+                            opt.image_glob, opt.max_length)
+        frame, ret = vs_depth.next_frame()
+        assert ret, 'Error when reading the first frame (try different --input?)'  
 
     frame_tensor = frame2tensor(frame, device)
     # 使用LightGlue提取特征
