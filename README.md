@@ -1,3 +1,35 @@
+# CUSTOM 
+
+## Addtional Requirements
+- open3d 0.10.0
+
+## TODO List
+
+- [x] lightglue match visualize like SuperGlue, LoFTR.
+
+  ```bash
+  python demo_lightglue.py --input RGB_PATH
+  ```
+
+- [x] visualize homography project result.
+
+  ```bash
+  python demo_lightglue.py --input RGB_PATH  --homo
+  ```
+
+- [x] accept depth input and estimate relative pose.
+
+  ```bash
+  # use depth data to calculate relative pose
+  python demo_lightglue.py --input RGB_PATH --input_depth DEPTH_PATH --depth_match
+  ```
+  <p align="center">
+  <img src=".gif" alt="example" width=80%>
+  </p>
+- [ ] accept Tracking-Anything mask input, and only use keypoints in mask region.
+
+# Origin
+
 <p align="center">
   <h1 align="center"><ins>LightGlue</ins> ⚡️<br>Local Feature Matching at Light Speed</h1>
   <p align="center">
@@ -23,11 +55,7 @@
 </p>
 
 
-## TODO List
-- [x] lightglue match visualize.
-- [x] visualize homography project.
-- [ ] accept depth input and estimate relative pose.
-- [ ] accept Tracking-Anything mask input, and only use keypoints in mask region.
+
 
 ##
 

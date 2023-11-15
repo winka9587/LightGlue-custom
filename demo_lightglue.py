@@ -35,9 +35,12 @@
 from pathlib import Path
 import argparse
 import cv2
+import matplotlib
+matplotlib.use('TkAgg')
+import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 import torch
-from homo import Homo_Projector
+from homo import Homo_Projector, concat_image_v
 import numpy as np
 
 # 引入LightGlue相关的类和函数
@@ -55,7 +58,7 @@ class VideoStreamerCollect:
     def __init__(self, inputs, labels, vs_opt):
         assert len(inputs) == len(labels)
         vs_dict = {labels[i]: VideoStreamer(input_src, vs_opt.resize, vs_opt.skip,
-                            vs_opt.image_glob, vs_opt.max_length) for i, input_src in enumerate(inputs)}
+                            vs_opt.image_glob, vs_opt.max_length, labels[i]) for i, input_src in enumerate(inputs) if input_src is not None}
         self.vs_collection = vs_dict
         
     def next_frame(self):
@@ -68,7 +71,9 @@ class VideoStreamerCollect:
         return frame_collect, ret_collect
     
     def get_i(self):
-        return {label: vs.i for label, vs in self.vs_collection.items()}
+        i_list = {label: vs.i for label, vs in self.vs_collection.items()}
+        assert all(x == list(i_list.values())[0] for x in i_list.values())
+        return i_list['rgb']
 
 # END: 7f0d3m5x8z9a
 # ...
@@ -82,9 +87,14 @@ if __name__ == '__main__':
         help='ID of a USB webcam, URL of an IP camera, '
              'or path to an image directory or movie file. default=\'0\' use camera')
     parser.add_argument(
-        '--input_depth', type=str, default='default',
+        '--input_depth', type=str, default=None,
         help='ID of a USB webcam, URL of an IP camera, '
              'or path to an image directory or movie file. default=\'0\' use camera')
+    parser.add_argument(
+        '--input_mask', type=str, default=None,
+        help='ID of a USB webcam, URL of an IP camera, '
+             'or path to an image directory or movie file. default=\'0\' use camera')
+    
     parser.add_argument(
         '--output_dir', type=str, default=None,
         help='Directory where to write output frames (If None, no output)')
@@ -130,6 +140,9 @@ if __name__ == '__main__':
     parser.add_argument(
         '--homo', action='store_true',
         help='project image0 to image1')
+    parser.add_argument(
+        '--depth_match', action='store_true',
+        help='match 3D pointcloud')
     
     # use mask img or video
     parser.add_argument(
@@ -149,27 +162,22 @@ if __name__ == '__main__':
     matcher = LightGlue(features='superpoint').eval().to(device)
     keys = ['keypoints', 'keypoint_scores', 'descriptors']
     # ...
-
-    vs = VideoStreamer(opt.input, opt.resize, opt.skip,
-                       opt.image_glob, opt.max_length)
-    frame, ret = vs.next_frame()
-    assert ret, 'Error when reading the first frame (try different --input?)'
     
-        # use default depth folder
-    if opt.input_depth == 'default':
-        depth_path = opt.input.replace('color', 'depth')
-        vs_depth = VideoStreamer(depth_path, opt.resize, opt.skip,
-                            opt.image_glob, opt.max_length)
-        frame, ret = vs_depth.next_frame()
-        assert ret, 'Error when reading the first frame (try different --input?)'  
-
+    input_labels = ['rgb', 'depth', 'mask']
+    input_paths = [opt.input, opt.input_depth, opt.input_mask]
+    vsc = VideoStreamerCollect(input_paths, input_labels, opt)
+    frames, rets = vsc.next_frame()
+    assert all(rets), 'Error when reading the first frame (try different --input?)'
+    
+    frame = frames['rgb']
     frame_tensor = frame2tensor(frame, device)
     # 使用LightGlue提取特征
     last_data = extractor.extract(frame_tensor)
     # last_data = {'keypoints0': last_data['keypoints'], 'descriptors0': last_data['descriptors']}
     # last_data['image0'] = frame_tensor
     last_frame = frame
-    frame, ret = vs.next_frame()
+    last_frame_depth = frames['depth']
+    frames, rets = vsc.next_frame()
     last_image_id = 0
 
     """
@@ -183,21 +191,24 @@ if __name__ == '__main__':
     K0 = np.array([[fx, 0, cx],
                   [0, fy, cy],
                   [0, 0, 1]])
-    K1 = np.array([[fx, 0, cx],
+    K1 = K0.copy()
+    K0_depth = np.array([[fx, 0, cx],
                   [0, fy, cy],
                   [0, 0, 1]])
-
+    K1_depth = K0_depth.copy()
     # ...
     timer = AverageTimer()
     if opt.homo:
         hpr = Homo_Projector()
     while True:
-        frame, ret = vs.next_frame()
-        if not ret:
+        frames, rets = vsc.next_frame()
+        if not any(rets):
             print('Finished demo_superglue.py')
             break
+        frame = frames['rgb']
+        frame_depth = frames['depth']
         timer.update('data')
-        stem0, stem1 = last_image_id, vs.i - 1
+        stem0, stem1 = last_image_id, vsc.get_i() - 1
         # ...
 
         frame_tensor = frame2tensor(frame, device)
@@ -224,6 +235,7 @@ if __name__ == '__main__':
         mkpts0 = kpts0[valid]
         mkpts1 = kpts1[matches[valid]]
         color = cm.jet(confidence[valid])
+
         text = [
             'LightGlue',
             'Keypoints: {}:{}'.format(len(kpts0), len(kpts1)),
@@ -240,9 +252,112 @@ if __name__ == '__main__':
             last_frame, frame, kpts0, kpts1, mkpts0, mkpts1, color, text,
             path=None, show_keypoints=opt.show_keypoints, small_text=small_text)
         
+        def create_colorbar():
+            plt.ioff()  # 关闭交互模式
+            # 创建一个从0到1的数组，表示置信度的可能范围
+            confidence_values = np.linspace(0, 1, 256).reshape(256, 1)
+
+            # 创建一个新的图像
+            fig, ax = plt.subplots(figsize=(1, 6))
+
+            # 在图像中显示置信度值
+            cax = ax.imshow(confidence_values, cmap='jet', origin='lower')
+            ax.set_axis_off()
+
+            # 添加一个颜色条的标签
+            fig.colorbar(cax, ax=ax, orientation='vertical', label='Confidence')
+
+            # 将Figure对象转换为RGB图像
+            fig.canvas.draw()
+            img = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
+            img = img.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+
+            # 关闭图像，释放资源
+            plt.close(fig)
+            plt.ion()  # 打开交互模式
+            return img
+        def add_colorbar_to_image(image, colorbar):
+            # 确保两个图像的高度相同
+            if image.shape[0] != colorbar.shape[0]:
+                scale_factor = image.shape[0] / colorbar.shape[0]
+                colorbar = cv2.resize(colorbar, None, fx=scale_factor, fy=scale_factor)
+            # 将两个图像拼接在一起
+            combined_image = np.hstack((image, colorbar))
+            return combined_image
+        colorbar = create_colorbar()
+        out = add_colorbar_to_image(out, colorbar)
+        
         if opt.homo:
             # last_frame, frame, mkpts0, mkpts1, K0, K1, concat_img, thresh=1., conf=0.99999
             out = hpr(last_frame, frame, mkpts0, mkpts1, K0, K1, out)
+            
+        if opt.depth_match:
+            # 将匹配的深度点反投影得到3D点
+            from utils import convert_2d_to_3d
+            pts0_3d, _ = convert_2d_to_3d(last_frame_depth, K0)
+            pts1_3d, _ = convert_2d_to_3d(frame_depth, K1)       
+            # mkpts0与mkpts1的shape是相同的
+            mkpts0_3d, choose0 = convert_2d_to_3d(last_frame_depth, K0, coords=mkpts0)  
+            mkpts1_3d, choose1 = convert_2d_to_3d(frame_depth, K1, coords=mkpts1) 
+            choose_ = np.logical_and(choose0, choose1)
+            choose_idx = np.where(choose_)
+            
+            mkpts0_3d, choose0 = convert_2d_to_3d(last_frame_depth, K0, coords=mkpts0[choose_idx])  
+            mkpts1_3d, choose1 = convert_2d_to_3d(frame_depth, K1, coords=mkpts1[choose_idx]) 
+            
+            mkpts0_3d_choosed = mkpts0_3d
+            mkpts1_3d_choosed = mkpts1_3d
+            scores = confidence[valid][choose_]
+            from vision_tool.PointCloudRender import PointCloudRender
+            # pcr = PointCloudRender()
+            # pcr.render_multi_pts("pts0 and kpts0", [pts0_3d, mkpts0_3d], [np.array([0, 0, 255]), np.array([255, 0, 0])])
+            # pcr.render_multi_pts("pts1 and kpts1", [pts1_3d, mkpts0_3d], [np.array([0, 0, 255]), np.array([255, 0, 0])])
+            
+            # choose0和choose1取交集choose_
+            # mkpts0_3d = mkpts0_3d[choose_]
+            # mkpts1_3d = mkpts1_3d[choose_]
+            from utils import compute_rigid_transform
+            import torch
+            transform = compute_rigid_transform(torch.from_numpy(mkpts0_3d_choosed).unsqueeze(0), 
+                                                torch.from_numpy(mkpts1_3d_choosed).unsqueeze(0), 
+                                                torch.from_numpy(scores).unsqueeze(0))
+            transform = transform.squeeze(0).numpy()
+            
+            
+            hpr2 = Homo_Projector()
+            rotate_matrix = transform[:3, :3]
+            translation = transform[:3, 3]
+            projected_image, ret_status = hpr2.project_image(last_frame, frame, rotate_matrix, translation)
+            # 将last_frame的关键点mkpts0[choose_idx]也投影到frame上, 并与frame的mkpts1[choose_idx]连线,
+            # 线的颜色使用cm.jet(scores)
+            
+            def project_points(points_3d, rotate_matrix, translation, camera_matrix):
+                """
+                将3D点投影到2D平面上
+                :param points_3d: 3D点, shape=(N, 3)
+                :param rotate_matrix: 旋转矩阵, shape=(3, 3)
+                :param translation: 平移向量, shape=(3,)
+                :param camera_matrix: 相机内参矩阵, shape=(3, 3)
+                :return: 投影后的2D点, shape=(N, 2)
+                """
+                points_3d = np.dot(points_3d, rotate_matrix.T) + translation
+                points_2d = np.dot(points_3d, camera_matrix.T)
+                points_2d = points_2d[:, :2] / points_2d[:, 2:]
+                return points_2d
+
+            projected_mkpts0 = project_points(mkpts0_3d_choosed, rotate_matrix, translation, K0)
+            projected_mkpts0 = projected_mkpts0[:, :2].astype(int)
+            projected_image = np.repeat(projected_image[:, :, np.newaxis], 3, axis=2)
+            
+            for i in range(len(projected_mkpts0)):
+                start_point = tuple(map(int, projected_mkpts0[i]))
+                end_point = tuple(map(int, mkpts1[choose_idx][i]))
+                cv2.line(projected_image, start_point, end_point, tuple(cm.jet(scores)[i][:3]*255.), 2)
+                        
+            
+            out = concat_image_v(out, projected_image)
+            
+            
 
         if not opt.no_display:            
             cv2.imshow('LightGlue matches', out)
@@ -256,7 +371,8 @@ if __name__ == '__main__':
                 last_data = {k: curr_data[k] for k in keys}
                 last_data['image0'] = frame_tensor
                 last_frame = frame
-                last_image_id = (vs.i - 1)
+                last_frame_depth = frame_depth
+                last_image_id = (vsc.get_i() - 1)
             elif key in ['e', 'r']:
                 # Increase/decrease keypoint threshold by 10% each keypress.
                 d = 0.1 * (-1 if key == 'e' else 1)

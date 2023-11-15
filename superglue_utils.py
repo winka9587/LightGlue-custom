@@ -103,7 +103,7 @@ class VideoStreamer:
         3.) A directory of images (files in directory matching 'image_glob').
         4.) A video file, such as an .mp4 or .avi file.
     """
-    def __init__(self, basedir, resize, skip, image_glob, max_length=1000000):
+    def __init__(self, basedir, resize, skip, image_glob, max_length=1000000, img_type='default'):
         self._ip_grabbed = False
         self._ip_running = False
         self._ip_camera = False
@@ -118,6 +118,7 @@ class VideoStreamer:
         self.i = 0
         self.skip = skip
         self.max_length = max_length
+        self.img_type = img_type
         if isinstance(basedir, int) or basedir.isdigit():
             print('==> Processing USB webcam input: {}'.format(basedir))
             self.cap = cv2.VideoCapture(int(basedir))
@@ -171,6 +172,25 @@ class VideoStreamer:
         grayim = cv2.resize(
             grayim, (w_new, h_new), interpolation=self.interp)
         return grayim
+    
+    def load_depth(self, img_path):
+        """ Load depth image(uint16) from img_path. """
+        if img_path.find('png') == -1:
+            depth_path = img_path + '_depth.png'
+        else:
+            depth_path = img_path
+        depth = cv2.imread(depth_path, -1)
+        if len(depth.shape) == 3:
+            # This is encoded depth image, let's convert
+            # NOTE: RGB is actually BGR in opencv
+            depth16 = depth[:, :, 1]*256 + depth[:, :, 2]
+            depth16 = np.where(depth16==32001, 0, depth16)
+            depth16 = depth16.astype(np.uint16)
+        elif len(depth.shape) == 2 and depth.dtype == 'uint16':
+            depth16 = depth
+        else:
+            assert False, '[ Error ]: Unsupported depth type.'
+        return depth16
 
     def next_frame(self):
         """ Return the next frame, and increment internal counter.
@@ -206,7 +226,10 @@ class VideoStreamer:
             image = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
         else:
             image_file = str(self.listing[self.i])
-            image = self.load_image(image_file)
+            if self.img_type == 'depth':
+                image = self.load_depth(image_file)
+            else:
+                image = self.load_image(image_file)
         self.i = self.i + 1
         return (image, True)
 
