@@ -43,6 +43,8 @@ import torch
 from homo import Homo_Projector, concat_image_v
 import numpy as np
 
+from utils import create_colorbar, add_colorbar_to_image
+
 # 引入LightGlue相关的类和函数
 from lightglue import LightGlue, SuperPoint, DISK, SIFT, ALIKED
 
@@ -74,6 +76,12 @@ class VideoStreamerCollect:
         i_list = {label: vs.i for label, vs in self.vs_collection.items()}
         assert all(x == list(i_list.values())[0] for x in i_list.values())
         return i_list['rgb']
+    
+    
+    def cleanup(self):
+        for label, vs in self.vs_collection.items():
+            vs.cleanup()
+            print("{} VideoStreamer clean up".format(label))
 
 # END: 7f0d3m5x8z9a
 # ...
@@ -156,6 +164,10 @@ if __name__ == '__main__':
 
     device = 'cuda' if torch.cuda.is_available() and not opt.force_cpu else 'cpu'
     # ...
+
+    # 可视化用颜色条
+            
+    colorbar = create_colorbar()
 
     # 初始化LightGlue
     extractor = SuperPoint(max_num_keypoints=opt.max_num_keypoints).eval().to(device)
@@ -252,39 +264,7 @@ if __name__ == '__main__':
             last_frame, frame, kpts0, kpts1, mkpts0, mkpts1, color, text,
             path=None, show_keypoints=opt.show_keypoints, small_text=small_text)
         
-        def create_colorbar():
-            plt.ioff()  # 关闭交互模式
-            # 创建一个从0到1的数组，表示置信度的可能范围
-            confidence_values = np.linspace(0, 1, 256).reshape(256, 1)
 
-            # 创建一个新的图像
-            fig, ax = plt.subplots(figsize=(1, 6))
-
-            # 在图像中显示置信度值
-            cax = ax.imshow(confidence_values, cmap='jet', origin='lower')
-            ax.set_axis_off()
-
-            # 添加一个颜色条的标签
-            fig.colorbar(cax, ax=ax, orientation='vertical', label='Confidence')
-
-            # 将Figure对象转换为RGB图像
-            fig.canvas.draw()
-            img = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
-            img = img.reshape(fig.canvas.get_width_height()[::-1] + (3,))
-
-            # 关闭图像，释放资源
-            plt.close(fig)
-            plt.ion()  # 打开交互模式
-            return img
-        def add_colorbar_to_image(image, colorbar):
-            # 确保两个图像的高度相同
-            if image.shape[0] != colorbar.shape[0]:
-                scale_factor = image.shape[0] / colorbar.shape[0]
-                colorbar = cv2.resize(colorbar, None, fx=scale_factor, fy=scale_factor)
-            # 将两个图像拼接在一起
-            combined_image = np.hstack((image, colorbar))
-            return combined_image
-        colorbar = create_colorbar()
         out = add_colorbar_to_image(out, colorbar)
         
         if opt.homo:
@@ -349,10 +329,11 @@ if __name__ == '__main__':
             projected_mkpts0 = projected_mkpts0[:, :2].astype(int)
             projected_image = np.repeat(projected_image[:, :, np.newaxis], 3, axis=2)
             
+            line_color = cm.jet(scores)[:, :3][:, ::-1]  # matplotlib RGB, opencv BGR, 同时注意, jet生成的是4位的颜色
             for i in range(len(projected_mkpts0)):
                 start_point = tuple(map(int, projected_mkpts0[i]))
                 end_point = tuple(map(int, mkpts1[choose_idx][i]))
-                cv2.line(projected_image, start_point, end_point, tuple(cm.jet(scores)[i][:3]*255.), 2)
+                cv2.line(projected_image, start_point, end_point, tuple(line_color[i]*255.), 2)
                         
             
             out = concat_image_v(out, projected_image)
@@ -364,7 +345,7 @@ if __name__ == '__main__':
             
             key = chr(cv2.waitKey(1) & 0xFF)
             if key == 'q':
-                vs.cleanup()
+                vsc.cleanup()
                 print('Exiting (via q) demo_superglue.py')
                 break
             elif key == 'n':  # set the current frame as anchor
@@ -401,4 +382,4 @@ if __name__ == '__main__':
             cv2.imwrite(out_file, out)
 
     cv2.destroyAllWindows()
-    vs.cleanup()
+    vsc.cleanup()
