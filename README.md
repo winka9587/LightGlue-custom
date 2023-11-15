@@ -5,19 +5,19 @@
 
 ## TODO List
 
-- [x] lightglue match visualize like SuperGlue, LoFTR.
+- [x] Visualize lightglue match results like SuperGlue, LoFTR.
 
   ```bash
   python demo_lightglue.py --input RGB_PATH
   ```
 
-- [x] visualize homography project result.
+- [x] Visualize homography project result.
 
   ```bash
   python demo_lightglue.py --input RGB_PATH  --homo
   ```
 
-- [x] accept depth input and estimate relative pose.
+- [x] Accept depth input and estimate relative pose.
 
   ```bash
   # use depth data to calculate relative pose
@@ -26,7 +26,8 @@
   <p align="center">
   <img src=".gif" alt="example" width=80%>
   </p>
-- [ ] accept Tracking-Anything mask input, and only use keypoints in mask region.
+
+- [ ] Accept mask input, and only use keypoints in mask region.
 
 # Origin
 
