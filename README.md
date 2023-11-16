@@ -28,6 +28,8 @@
   </p>
 
 - [ ] Accept mask input, and only use keypoints in mask region.
+  - [x] Only match keypoints in 2D bbox region.
+  - [ ] Only match keypoints in foreground region.
 
 # Origin
 
