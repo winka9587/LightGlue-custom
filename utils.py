@@ -146,6 +146,7 @@ import matplotlib
 matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
 import cv2
+import numpy as np
 def create_colorbar():
     plt.ioff()  # 关闭交互模式
     # 创建一个从0到1的线性间隔的数组，表示置信度的可能范围
@@ -180,3 +181,87 @@ def add_colorbar_to_image(image, colorbar):
     # 将两个图像拼接在一起
     combined_image = np.hstack((image, colorbar))
     return combined_image
+
+
+def generate_bounding_box(image):
+    """
+    Generate 2D bounding box using points with pixel value of 1 in the image.
+
+    Args:
+        image: numpy array of shape (H, W) representing the image.
+
+    Returns:
+        A tuple of (x_min, y_min, x_max, y_max) representing the bounding box coordinates.
+    """
+    # Find all 2d points with pixel value of 1
+    points = np.argwhere(image == 1)
+    # Get the minimum and maximum x and y coordinates
+    x_min = np.min(points[:, 1])
+    y_min = np.min(points[:, 0])
+    x_max = np.max(points[:, 1])
+    y_max = np.max(points[:, 0])
+    # Make the bounding box a square by taking the larger of the width and height
+    width = x_max - x_min
+    height = y_max - y_min
+    if width > height:
+        y_center = (y_min + y_max) // 2
+        y_max = y_min + width
+        y_min = y_center - width // 2
+    else:
+        x_center = (x_min + x_max) // 2
+        x_max = x_min + height
+        x_min = x_center - height // 2
+    # Ensure the bounding box does not go out of bounds
+    x_min = max(0, x_min)
+    y_min = max(0, y_min)
+    x_max = min(image.shape[1], x_max)
+    y_max = min(image.shape[0], y_max)
+    # Return the modified bounding box
+    return x_min, y_min, x_max, y_max
+
+
+def crop_image_by_bounding_box(bounding_box, image):
+    """
+    Crop an image based on a given bounding box.
+
+    Args:
+        bounding_box: A tuple of (x_min, y_min, x_max, y_max) representing the bounding box coordinates.
+        image: A numpy array of shape (H, W) representing the image.
+
+    Returns:
+        A numpy array of shape (y_max - y_min, x_max - x_min) representing the cropped image.
+    """
+    x_min, y_min, x_max, y_max = bounding_box
+    # Ensure the bounding box does not go out of bounds
+    x_min = max(0, x_min)
+    y_min = max(0, y_min)
+    x_max = min(image.shape[1], x_max)
+    y_max = min(image.shape[0], y_max)
+    return image[y_min:y_max, x_min:x_max]
+
+
+
+def pad_image(image, target_shape):
+    """
+    Pad an image with zeros to match a target shape.
+
+    Args:
+        image: A numpy array of shape (H, W) representing the image.
+        target_shape: A tuple of (H, W) representing the target shape.
+
+    Returns:
+        A numpy array of shape (target_shape[0], target_shape[1]) representing the padded image.
+    """
+    # Get the dimensions of the input image
+    height, width = image.shape
+    # Get the dimensions of the target shape
+    target_height, target_width = target_shape
+    # If the input image is already larger than the target shape, return the input image
+    if height >= target_height and width >= target_width:
+        return image
+    # Compute the amount of padding needed in each dimension
+    pad_height = max(0, target_height - height)
+    pad_width = max(0, target_width - width)
+    # Pad the image with zeros
+    padded_image = np.pad(image, ((0, pad_height), (0, pad_width)), mode='constant')
+    return padded_image

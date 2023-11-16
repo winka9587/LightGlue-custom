@@ -14,8 +14,10 @@
             "python": "/home/cxx/App/anaconda3/envs/lightglue/bin/python",
             "args": ["--input", "/data4/cxx/dataset/desk_3/color/", 
                      "--input_depth", "/data4/cxx/dataset/desk_3/depth/", 
-                     "--depth_match"
-                     ]  //"args": ["--quiet", "--norepeat", "--port", "1593"],
+                     "--depth_match",
+                     "--input_mask", "/data4/cxx/dataset/desk_3/mask/"
+                     
+                     ]  //"--input_mask", "/data4/cxx/dataset/desk_3/mask/"
 
         }
     ]

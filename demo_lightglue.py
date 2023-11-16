@@ -43,7 +43,7 @@ import torch
 from homo import Homo_Projector, concat_image_v
 import numpy as np
 
-from utils import create_colorbar, add_colorbar_to_image
+from utils import create_colorbar, add_colorbar_to_image, generate_bounding_box, crop_image_by_bounding_box, pad_image
 
 # 引入LightGlue相关的类和函数
 from lightglue import LightGlue, SuperPoint, DISK, SIFT, ALIKED
@@ -100,8 +100,8 @@ if __name__ == '__main__':
              'or path to an image directory or movie file. default=\'0\' use camera')
     parser.add_argument(
         '--input_mask', type=str, default=None,
-        help='ID of a USB webcam, URL of an IP camera, '
-             'or path to an image directory or movie file. default=\'0\' use camera')
+        help='Only match keypoints in the mask area')
+    
     
     parser.add_argument(
         '--output_dir', type=str, default=None,
@@ -151,13 +151,6 @@ if __name__ == '__main__':
     parser.add_argument(
         '--depth_match', action='store_true',
         help='match 3D pointcloud')
-    
-    # use mask img or video
-    parser.add_argument(
-        '--mask_folder', 
-        type=str, 
-        default='/data4/cxx/dataset/desk_mask',
-        help='Only match keypoints in the mask area')
 
     opt = parser.parse_args()
     print(opt)
@@ -189,6 +182,9 @@ if __name__ == '__main__':
     # last_data['image0'] = frame_tensor
     last_frame = frame
     last_frame_depth = frames['depth']
+    if opt.input_mask is not None:
+        last_frame_mask = frames['mask']
+
     frames, rets = vsc.next_frame()
     last_image_id = 0
 
@@ -219,6 +215,8 @@ if __name__ == '__main__':
             break
         frame = frames['rgb']
         frame_depth = frames['depth']
+        if opt.input_mask is not None:
+            frame_mask = frames['mask']
         timer.update('data')
         stem0, stem1 = last_image_id, vsc.get_i() - 1
         # ...
@@ -246,6 +244,7 @@ if __name__ == '__main__':
         valid = matches > -1
         mkpts0 = kpts0[valid]
         mkpts1 = kpts1[matches[valid]]
+        scores = confidence[valid]  # 用于match
         color = cm.jet(confidence[valid])
 
         text = [
@@ -260,6 +259,49 @@ if __name__ == '__main__':
             'Match Threshold: {:.2f}'.format(m_thresh),
             'Image Pair: {:06}:{:06}'.format(stem0, stem1),
         ]
+        
+        if opt.input_mask is not None:
+            last_bbox = generate_bounding_box(last_frame_mask)
+            bbox = generate_bounding_box(frame_mask)
+    
+            # 检查mkpts0与mkpts1的2D坐标，分别保留其中在last_bbox和bbox中的点。记录保留点的下标choose_bbox0和choose_bbox1
+            from utils import generate_bounding_box
+            last_bbox = generate_bounding_box(last_frame_mask)
+            bbox = generate_bounding_box(frame_mask)
+            choose_bbox0 = np.logical_and(mkpts0[:, 0] > last_bbox[0], mkpts0[:, 0] < last_bbox[2]) & np.logical_and(mkpts0[:, 1] > last_bbox[1], mkpts0[:, 1] < last_bbox[3])
+            choose_bbox1 = np.logical_and(mkpts1[:, 0] > bbox[0], mkpts1[:, 0] < bbox[2]) & np.logical_and(mkpts1[:, 1] > bbox[1], mkpts1[:, 1] < bbox[3])
+            choose_bbox_idx = np.logical_and(choose_bbox0, choose_bbox1)
+
+            # Keep the remaining keypoint matches
+            mkpts0 = mkpts0[choose_bbox_idx]
+            mkpts1 = mkpts1[choose_bbox_idx]
+            scores = scores[choose_bbox_idx]
+            # 将last_frame中last_bbox以外的部分设置为白色
+            last_frame_mask_tmp = np.zeros_like(last_frame_mask)
+            frame_mask_tmp = np.zeros_like(frame_mask)
+            last_frame_mask_tmp[last_bbox[1]:last_bbox[3], last_bbox[0]:last_bbox[2]] = 255
+            last_frame[last_frame_mask_tmp == 0] = 255
+            
+            # 让bbox以外的部分变为白色, bbox以内的部分半透明，mask==1的部分保持原来的样子。
+            import numpy as np
+            import cv2
+
+            # 创建一个frame的副本
+            frame_copy = frame.copy()
+            # 将bbox以外的部分设置为白色
+            frame_copy[:bbox[1], :] = 255
+            frame_copy[bbox[3]:, :] = 255
+            frame_copy[:, :bbox[0]] = 255
+            frame_copy[:, bbox[2]:] = 255
+
+            # bbox以内的部分半透明
+            alpha = 0.5
+            overlay = frame[bbox[1]:bbox[3], bbox[0]:bbox[2]].copy()
+            cv2.addWeighted(overlay, alpha, frame_copy[bbox[1]:bbox[3], bbox[0]:bbox[2]], 1 - alpha, 0, frame_copy[bbox[1]:bbox[3], bbox[0]:bbox[2]])
+            # mask==1的部分保持原来的颜色
+            frame_copy[frame_mask == 1] = frame[frame_mask == 1]
+            frame = frame_copy
+        
         out = make_matching_plot_fast(
             last_frame, frame, kpts0, kpts1, mkpts0, mkpts1, color, text,
             path=None, show_keypoints=opt.show_keypoints, small_text=small_text)
@@ -270,7 +312,8 @@ if __name__ == '__main__':
         if opt.homo:
             # last_frame, frame, mkpts0, mkpts1, K0, K1, concat_img, thresh=1., conf=0.99999
             out = hpr(last_frame, frame, mkpts0, mkpts1, K0, K1, out)
-            
+
+        
         if opt.depth_match:
             # 将匹配的深度点反投影得到3D点
             from utils import convert_2d_to_3d
@@ -281,13 +324,13 @@ if __name__ == '__main__':
             mkpts1_3d, choose1 = convert_2d_to_3d(frame_depth, K1, coords=mkpts1) 
             choose_ = np.logical_and(choose0, choose1)
             choose_idx = np.where(choose_)
-            
-            mkpts0_3d, choose0 = convert_2d_to_3d(last_frame_depth, K0, coords=mkpts0[choose_idx])  
-            mkpts1_3d, choose1 = convert_2d_to_3d(frame_depth, K1, coords=mkpts1[choose_idx]) 
+            # 下面输入的coords=参数已经必定是有深度值的, 因此第二个返回值不再需要了
+            mkpts0_3d, _ = convert_2d_to_3d(last_frame_depth, K0, coords=mkpts0[choose_idx])  
+            mkpts1_3d, _ = convert_2d_to_3d(frame_depth, K1, coords=mkpts1[choose_idx]) 
             
             mkpts0_3d_choosed = mkpts0_3d
             mkpts1_3d_choosed = mkpts1_3d
-            scores = confidence[valid][choose_]
+            scores = scores[choose_]
             from vision_tool.PointCloudRender import PointCloudRender
             # pcr = PointCloudRender()
             # pcr.render_multi_pts("pts0 and kpts0", [pts0_3d, mkpts0_3d], [np.array([0, 0, 255]), np.array([255, 0, 0])])
@@ -337,8 +380,6 @@ if __name__ == '__main__':
                         
             
             out = concat_image_v(out, projected_image)
-            
-            
 
         if not opt.no_display:            
             cv2.imshow('LightGlue matches', out)
@@ -353,6 +394,8 @@ if __name__ == '__main__':
                 last_data['image0'] = frame_tensor
                 last_frame = frame
                 last_frame_depth = frame_depth
+                if opt.input_mask is not None:
+                    last_frame_mask = frame_mask
                 last_image_id = (vsc.get_i() - 1)
             elif key in ['e', 'r']:
                 # Increase/decrease keypoint threshold by 10% each keypress.
