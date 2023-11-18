@@ -36,7 +36,7 @@ class Homo_Projector:
             print("Error in calculate image project by kpts")
         return concat_image_v(concat_img, projected_image)
          
-    
+    # 输入图像和关键点mkpts, 使用对应的关键点估计相对位姿, 使用估计得到的旋转和位移对图像进行变换
     def project_image_by_kpts(self, last_frame, frame, mkpts0, mkpts1, K0, K1, thresh=1., conf=0.99999):
         # 计算相对位姿
         thresh = 1.
@@ -105,7 +105,7 @@ class Homo_Projector:
             
     # 输入(3,3)旋转矩阵RotateMatrix,和(3,1)大小translation对两个图像imge1和imge2进行变换，
     # 将图像1投影到图像2，同时图像1半透明化
-    def project_image(self, image1, image2, RotateMatrix, translation):
+    def project_image2(self, image1, image2, RotateMatrix, translation):
         MIN_MATCH_COUNT = 10
         sift = cv2.xfeatures2d.SIFT_create()
         flann = cv2.FlannBasedMatcher({'algorithm': 0, 'trees': 5}, {'checks': 50})
@@ -142,8 +142,91 @@ class Homo_Projector:
             alpha = 0.5
             image2 = cv2.addWeighted(image2, 1 - alpha, overlay, alpha, 0)
             ret_status = True
-            return image2, ret_status
+            log_text = "Not enough matches are found - {}/{}".format(len(good_matches), MIN_MATCH_COUNT)
         else:
-            print("Not enough matches are found - {}/{}".format(len(good_matches), MIN_MATCH_COUNT))
             ret_status = False
-            return image2, ret_status
+            log_text = "Not enough matches are found - {}/{}".format(len(good_matches), MIN_MATCH_COUNT)
+        # 同时在图像绘制文本, 提示match不足以支持位姿估计
+        H, W = image2.shape
+        sc = min(H / 640., 2.0)
+        Ht = int(30 * sc)  # text height
+        txt_color_fg = (255, 0, 0)
+        txt_color_bg = (0, 0, 0)
+        print(log_text)
+        text = [
+            log_text
+        ]
+        for i, t in enumerate(text):
+            cv2.putText(image2, t, (int(8*sc), Ht*(i+1)), cv2.FONT_HERSHEY_DUPLEX,
+                        1.0*sc, txt_color_bg, 2, cv2.LINE_AA)
+            
+        image2 = np.repeat(image2[:, :, np.newaxis], 3, axis=2)
+        return image2, ret_status
+    
+
+
+    def project_image(self, image1, image2, K1, K2, R, T, match_num):
+        H, W = image2.shape
+        if match_num != 0:
+            # 获取图像的高度和宽度
+            height, width = image1.shape
+
+            # 创建一个网格坐标矩阵
+            x1, y1 = np.meshgrid(np.arange(width), np.arange(height))
+            x1 = x1.flatten()
+            y1 = y1.flatten()
+            z1 = np.ones_like(x1)
+
+            # 将像素坐标转换为相机1的归一化平面坐标
+            # p1 = np.vstack((x1, y1, z1))
+            # p1 = np.vstack((x1.flatten(), y1.flatten(), z1.flatten())).T
+            p1 = np.vstack((x1.flatten(), y1.flatten(), np.ones_like(x1.flatten())))
+
+            p1_normalized = np.dot(np.linalg.inv(K1), p1)
+
+            # 使用外参数将点从相机1坐标系转换到相机2坐标系
+            p2 = np.dot(R, p1_normalized) + T.reshape(-1, 1)
+
+
+            # 将点映射回相机2的归一化平面坐标
+            p2_normalized = p2 / p2[2]
+
+            # 使用相机2的内参数将点映射回像素坐标
+            p2_pixel = np.dot(K2, p2_normalized)
+
+            # 获取相应像素的颜色值
+            x2 = p2_pixel[0].astype(int)
+            y2 = p2_pixel[1].astype(int)
+
+            # 确保映射后的像素坐标在图像2的范围内
+            valid_mask = (x2 >= 0) & (x2 < width) & (y2 >= 0) & (y2 < height)
+
+            # 创建投影后的单通道图像2
+            projected_image = np.zeros_like(image2)
+            projected_image[y2[valid_mask], x2[valid_mask]] = image1[y1[valid_mask], x1[valid_mask]]
+        else:
+            projected_image = image1.copy()
+
+        # 将projected_image半透明化与image2拼接
+        alpha = 0.5
+        image2 = cv2.addWeighted(image2, 1 - alpha, projected_image, alpha, 0)
+        
+        # 单通道->3通道
+        image2 = np.repeat(image2[:, :, np.newaxis], 3, axis=2)
+        
+        # 同时在图像绘制文本, 提示match不足以支持位姿估计
+        log_text = "matches num: {}".format(match_num)
+        
+        sc = min(W / 640., 2.0)
+        Ht = int(30 * sc)  # text height
+        txt_color_fg = (0, 0, 0)
+        txt_color_bg = (0, 0, 0)
+        print(log_text)
+        text = [
+            log_text
+        ]
+        for i, t in enumerate(text):
+            cv2.putText(image2, t, (int(8*sc), Ht*(i+1)), cv2.FONT_HERSHEY_DUPLEX,
+                        1.0*sc, txt_color_bg, 2, cv2.LINE_AA)
+
+        return image2, True

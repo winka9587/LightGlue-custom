@@ -43,7 +43,7 @@ import torch
 from homo import Homo_Projector, concat_image_v
 import numpy as np
 
-from utils import create_colorbar, add_colorbar_to_image, generate_bounding_box, crop_image_by_bounding_box, pad_image
+from utils import create_colorbar, add_colorbar_to_image, generate_bounding_box, crop_image_by_bounding_box, pad_image, project_points
 
 # 引入LightGlue相关的类和函数
 from lightglue import LightGlue, SuperPoint, DISK, SIFT, ALIKED
@@ -151,6 +151,9 @@ if __name__ == '__main__':
     parser.add_argument(
         '--depth_match', action='store_true',
         help='match 3D pointcloud')
+    parser.add_argument(
+        '--mask_foreground', action='store_true',
+        help='match 3D pointcloud')
 
     opt = parser.parse_args()
     print(opt)
@@ -181,7 +184,8 @@ if __name__ == '__main__':
     # last_data = {'keypoints0': last_data['keypoints'], 'descriptors0': last_data['descriptors']}
     # last_data['image0'] = frame_tensor
     last_frame = frame
-    last_frame_depth = frames['depth']
+    if opt.input_depth is not None:
+        last_frame_depth = frames['depth']
     if opt.input_mask is not None:
         last_frame_mask = frames['mask']
 
@@ -208,13 +212,20 @@ if __name__ == '__main__':
     timer = AverageTimer()
     if opt.homo:
         hpr = Homo_Projector()
+    
+    if opt.output_dir is not None:
+        print('==> Will write outputs to {}'.format(opt.output_dir))
+        Path(opt.output_dir).mkdir(exist_ok=True)
+        
+        
     while True:
         frames, rets = vsc.next_frame()
         if not any(rets):
             print('Finished demo_superglue.py')
             break
         frame = frames['rgb']
-        frame_depth = frames['depth']
+        if opt.input_depth is not None:
+            frame_depth = frames['depth']
         if opt.input_mask is not None:
             frame_mask = frames['mask']
         timer.update('data')
@@ -261,46 +272,68 @@ if __name__ == '__main__':
         ]
         
         if opt.input_mask is not None:
-            last_bbox = generate_bounding_box(last_frame_mask)
-            bbox = generate_bounding_box(frame_mask)
-    
-            # 检查mkpts0与mkpts1的2D坐标，分别保留其中在last_bbox和bbox中的点。记录保留点的下标choose_bbox0和choose_bbox1
-            from utils import generate_bounding_box
-            last_bbox = generate_bounding_box(last_frame_mask)
-            bbox = generate_bounding_box(frame_mask)
-            choose_bbox0 = np.logical_and(mkpts0[:, 0] > last_bbox[0], mkpts0[:, 0] < last_bbox[2]) & np.logical_and(mkpts0[:, 1] > last_bbox[1], mkpts0[:, 1] < last_bbox[3])
-            choose_bbox1 = np.logical_and(mkpts1[:, 0] > bbox[0], mkpts1[:, 0] < bbox[2]) & np.logical_and(mkpts1[:, 1] > bbox[1], mkpts1[:, 1] < bbox[3])
-            choose_bbox_idx = np.logical_and(choose_bbox0, choose_bbox1)
+            if opt.mask_foreground:
+                # 仅使用前景区域内的关键点
+                # 检查mkpts0与mkpts1的2D坐标，分别保留其中在last_frame_mask和frame_mask中mask==1的点。记录保留点的下标choose_bbox0和choose_bbox1
+                choose_bbox0 = (last_frame_mask[mkpts0[:, 1].astype(int), mkpts0[:, 0].astype(int)] == 1)
+                choose_bbox1 = (frame_mask[mkpts1[:, 1].astype(int), mkpts1[:, 0].astype(int)] == 1)
+                choose_bbox_idx = np.logical_and(choose_bbox0, choose_bbox1)
 
-            # Keep the remaining keypoint matches
-            mkpts0 = mkpts0[choose_bbox_idx]
-            mkpts1 = mkpts1[choose_bbox_idx]
-            scores = scores[choose_bbox_idx]
-            # 将last_frame中last_bbox以外的部分设置为白色
-            last_frame_mask_tmp = np.zeros_like(last_frame_mask)
-            frame_mask_tmp = np.zeros_like(frame_mask)
-            last_frame_mask_tmp[last_bbox[1]:last_bbox[3], last_bbox[0]:last_bbox[2]] = 255
-            last_frame[last_frame_mask_tmp == 0] = 255
+                # Keep the remaining keypoint matches
+                mkpts0 = mkpts0[choose_bbox_idx]
+                mkpts1 = mkpts1[choose_bbox_idx]
+                scores = scores[choose_bbox_idx]
+                # 将last_frame中mask==0的部分设置为白色
+                last_frame[last_frame_mask == 0] = 255
+                
+                # 让frame中mask==0的部分变为白色, mask==1的部分半透明
+                frame[frame_mask == 0] = 255
+                frame[frame_mask == 1] = 0.5 * frame[frame_mask == 1] + 0.5 * np.array([255])
+                pass
+            else:
+                last_bbox = generate_bounding_box(last_frame_mask)
+                bbox = generate_bounding_box(frame_mask)
+        
+                # 检查mkpts0与mkpts1的2D坐标，分别保留其中在last_bbox和bbox中的点。记录保留点的下标choose_bbox0和choose_bbox1
+                from utils import generate_bounding_box
+                last_bbox = generate_bounding_box(last_frame_mask)
+                bbox = generate_bounding_box(frame_mask)
+                choose_bbox0 = np.logical_and(mkpts0[:, 0] > last_bbox[0], mkpts0[:, 0] < last_bbox[2]) & np.logical_and(mkpts0[:, 1] > last_bbox[1], mkpts0[:, 1] < last_bbox[3])
+                choose_bbox1 = np.logical_and(mkpts1[:, 0] > bbox[0], mkpts1[:, 0] < bbox[2]) & np.logical_and(mkpts1[:, 1] > bbox[1], mkpts1[:, 1] < bbox[3])
+                choose_bbox_idx = np.logical_and(choose_bbox0, choose_bbox1)
+
+                # Keep the remaining keypoint matches
+                mkpts0 = mkpts0[choose_bbox_idx]
+                mkpts1 = mkpts1[choose_bbox_idx]
+                scores = scores[choose_bbox_idx]
+                # 将last_frame中last_bbox以外的部分设置为白色
+                last_frame_mask_tmp = np.zeros_like(last_frame_mask)
+                frame_mask_tmp = np.zeros_like(frame_mask)
+                last_frame_mask_tmp[last_bbox[1]:last_bbox[3], last_bbox[0]:last_bbox[2]] = 255
+                last_frame[last_frame_mask_tmp == 0] = 255
+                
+                # 让bbox以外的部分变为白色, bbox以内的部分半透明，mask==1的部分保持原来的样子。
+                import numpy as np
+                import cv2
+
+                # 创建一个frame的副本
+                frame_copy = frame.copy()
+                # 将bbox以外的部分设置为白色
+                frame_copy[:bbox[1], :] = 255
+                frame_copy[bbox[3]:, :] = 255
+                frame_copy[:, :bbox[0]] = 255
+                frame_copy[:, bbox[2]:] = 255
+
+                # bbox以内的部分半透明
+                alpha = 0.5
+                overlay = frame[bbox[1]:bbox[3], bbox[0]:bbox[2]].copy()
+                cv2.addWeighted(overlay, alpha, frame_copy[bbox[1]:bbox[3], bbox[0]:bbox[2]], 1 - alpha, 0, frame_copy[bbox[1]:bbox[3], bbox[0]:bbox[2]])
+                # mask==1的部分保持原来的颜色
+                frame_copy[frame_mask == 1] = frame[frame_mask == 1]
+                frame = frame_copy
+        
+        
             
-            # 让bbox以外的部分变为白色, bbox以内的部分半透明，mask==1的部分保持原来的样子。
-            import numpy as np
-            import cv2
-
-            # 创建一个frame的副本
-            frame_copy = frame.copy()
-            # 将bbox以外的部分设置为白色
-            frame_copy[:bbox[1], :] = 255
-            frame_copy[bbox[3]:, :] = 255
-            frame_copy[:, :bbox[0]] = 255
-            frame_copy[:, bbox[2]:] = 255
-
-            # bbox以内的部分半透明
-            alpha = 0.5
-            overlay = frame[bbox[1]:bbox[3], bbox[0]:bbox[2]].copy()
-            cv2.addWeighted(overlay, alpha, frame_copy[bbox[1]:bbox[3], bbox[0]:bbox[2]], 1 - alpha, 0, frame_copy[bbox[1]:bbox[3], bbox[0]:bbox[2]])
-            # mask==1的部分保持原来的颜色
-            frame_copy[frame_mask == 1] = frame[frame_mask == 1]
-            frame = frame_copy
         
         out = make_matching_plot_fast(
             last_frame, frame, kpts0, kpts1, mkpts0, mkpts1, color, text,
@@ -332,13 +365,6 @@ if __name__ == '__main__':
             mkpts1_3d_choosed = mkpts1_3d
             scores = scores[choose_]
             from vision_tool.PointCloudRender import PointCloudRender
-            # pcr = PointCloudRender()
-            # pcr.render_multi_pts("pts0 and kpts0", [pts0_3d, mkpts0_3d], [np.array([0, 0, 255]), np.array([255, 0, 0])])
-            # pcr.render_multi_pts("pts1 and kpts1", [pts1_3d, mkpts0_3d], [np.array([0, 0, 255]), np.array([255, 0, 0])])
-            
-            # choose0和choose1取交集choose_
-            # mkpts0_3d = mkpts0_3d[choose_]
-            # mkpts1_3d = mkpts1_3d[choose_]
             from utils import compute_rigid_transform
             import torch
             transform = compute_rigid_transform(torch.from_numpy(mkpts0_3d_choosed).unsqueeze(0), 
@@ -350,27 +376,15 @@ if __name__ == '__main__':
             hpr2 = Homo_Projector()
             rotate_matrix = transform[:3, :3]
             translation = transform[:3, 3]
-            projected_image, ret_status = hpr2.project_image(last_frame, frame, rotate_matrix, translation)
+            projected_image, ret_status = hpr2.project_image(last_frame, frame, K0, K1, rotate_matrix, translation, mkpts0_3d_choosed.shape[0])
             # 将last_frame的关键点mkpts0[choose_idx]也投影到frame上, 并与frame的mkpts1[choose_idx]连线,
             # 线的颜色使用cm.jet(scores)
             
-            def project_points(points_3d, rotate_matrix, translation, camera_matrix):
-                """
-                将3D点投影到2D平面上
-                :param points_3d: 3D点, shape=(N, 3)
-                :param rotate_matrix: 旋转矩阵, shape=(3, 3)
-                :param translation: 平移向量, shape=(3,)
-                :param camera_matrix: 相机内参矩阵, shape=(3, 3)
-                :return: 投影后的2D点, shape=(N, 2)
-                """
-                points_3d = np.dot(points_3d, rotate_matrix.T) + translation
-                points_2d = np.dot(points_3d, camera_matrix.T)
-                points_2d = points_2d[:, :2] / points_2d[:, 2:]
-                return points_2d
+            
 
             projected_mkpts0 = project_points(mkpts0_3d_choosed, rotate_matrix, translation, K0)
             projected_mkpts0 = projected_mkpts0[:, :2].astype(int)
-            projected_image = np.repeat(projected_image[:, :, np.newaxis], 3, axis=2)
+            
             
             line_color = cm.jet(scores)[:, :3][:, ::-1]  # matplotlib RGB, opencv BGR, 同时注意, jet生成的是4位的颜色
             for i in range(len(projected_mkpts0)):
@@ -393,7 +407,8 @@ if __name__ == '__main__':
                 last_data = {k: curr_data[k] for k in keys}
                 last_data['image0'] = frame_tensor
                 last_frame = frame
-                last_frame_depth = frame_depth
+                if opt.input_depth is not None:
+                    last_frame_depth = frame_depth
                 if opt.input_mask is not None:
                     last_frame_mask = frame_mask
                 last_image_id = (vsc.get_i() - 1)

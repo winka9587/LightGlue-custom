@@ -27,9 +27,11 @@
   <img src=".gif" alt="example" width=80%>
   </p>
 
-- [ ] Accept mask input, and only use keypoints in mask region.
+- [x] Accept mask input, and only use keypoints in mask region.
   - [x] Only match keypoints in 2D bbox region.
-  - [ ] Only match keypoints in foreground region.
+  - [x] Only match keypoints in foreground region.
+
+- [ ] Project 3D pointcloud from image1 to image2
 
 # Origin
 

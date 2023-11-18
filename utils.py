@@ -106,6 +106,21 @@ def get_depth_at_coords(coords, depth):
     return I
 
 
+def project_points(points_3d, rotate_matrix, translation, camera_matrix):
+    """
+    将3D点投影到2D平面上
+    :param points_3d: 3D点, shape=(N, 3)
+    :param rotate_matrix: 旋转矩阵, shape=(3, 3)
+    :param translation: 平移向量, shape=(3,)
+    :param camera_matrix: 相机内参矩阵, shape=(3, 3)
+    :return: 投影后的2D点, shape=(N, 2)
+    """
+    points_3d = np.dot(points_3d, rotate_matrix.T) + translation
+    points_2d = np.dot(points_3d, camera_matrix.T)
+    points_2d = points_2d[:, :2] / points_2d[:, 2:]
+    return points_2d
+
+
 import torch
 def compute_rigid_transform(a: torch.Tensor, b: torch.Tensor, weights: torch.Tensor):
     """Compute rigid transforms between two point sets
