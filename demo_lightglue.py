@@ -152,8 +152,14 @@ if __name__ == '__main__':
         '--depth_match', action='store_true',
         help='match 3D pointcloud')
     parser.add_argument(
+        '--points_project', action='store_true',
+        help='project 3D pointcloud rather than image by homo')
+    parser.add_argument(
         '--mask_foreground', action='store_true',
         help='match 3D pointcloud')
+    
+    
+    
 
     opt = parser.parse_args()
     print(opt)
@@ -348,6 +354,7 @@ if __name__ == '__main__':
 
         
         if opt.depth_match:
+            # 使用深度估计相对位姿, 并投影图像
             # 将匹配的深度点反投影得到3D点
             from utils import convert_2d_to_3d
             pts0_3d, _ = convert_2d_to_3d(last_frame_depth, K0)
@@ -365,32 +372,49 @@ if __name__ == '__main__':
             mkpts1_3d_choosed = mkpts1_3d
             scores = scores[choose_]
             from vision_tool.PointCloudRender import PointCloudRender
-            from utils import compute_rigid_transform
+            from utils import compute_rigid_transform, transform_inv
             import torch
-            transform = compute_rigid_transform(torch.from_numpy(mkpts0_3d_choosed).unsqueeze(0), 
+            RTmatrix_0 = compute_rigid_transform(torch.from_numpy(mkpts0_3d_choosed).unsqueeze(0), 
                                                 torch.from_numpy(mkpts1_3d_choosed).unsqueeze(0), 
                                                 torch.from_numpy(scores).unsqueeze(0))
-            transform = transform.squeeze(0).numpy()
+            RTmatrix_1 = RTmatrix_0.squeeze(0).numpy()
+            # RTmatrix_1 = transform_inv(RTmatrix_0)
+            RTmatrix = RTmatrix_1
             
-            
-            hpr2 = Homo_Projector()
-            rotate_matrix = transform[:3, :3]
-            translation = transform[:3, 3]
-            projected_image, ret_status = hpr2.project_image(last_frame, frame, K0, K1, rotate_matrix, translation, mkpts0_3d_choosed.shape[0])
-            # 将last_frame的关键点mkpts0[choose_idx]也投影到frame上, 并与frame的mkpts1[choose_idx]连线,
-            # 线的颜色使用cm.jet(scores)
-            
-            
-
-            projected_mkpts0 = project_points(mkpts0_3d_choosed, rotate_matrix, translation, K0)
-            projected_mkpts0 = projected_mkpts0[:, :2].astype(int)
-            
-            
-            line_color = cm.jet(scores)[:, :3][:, ::-1]  # matplotlib RGB, opencv BGR, 同时注意, jet生成的是4位的颜色
-            for i in range(len(projected_mkpts0)):
-                start_point = tuple(map(int, projected_mkpts0[i]))
-                end_point = tuple(map(int, mkpts1[choose_idx][i]))
-                cv2.line(projected_image, start_point, end_point, tuple(line_color[i]*255.), 2)
+            if opt.points_project and opt.input_mask is not None:
+                from utils import backproject_pts, transform
+                # 投影3D点云到另一个图像
+                # 输入mask+depth+K,提取3d点云
+                obj_pts = backproject_pts(last_frame_depth, last_frame_mask, K0, sa=4096)
+                # 对3D点云进行R,t位姿变换, 得到另一个相机下的点云
+                obj_pts = obj_pts.reshape(1, -1, 3)
+                RTmatrix = RTmatrix.reshape(1, -1, 4)
+                transformed_pt = transform(RTmatrix, obj_pts).squeeze(0)
+                # 将3D点云投影到另一个图像上
+                from vision_tool.drawOnImg import viz_target_on_img
+                r = 0
+                g = 255
+                b = 150
+                image2 = frame.copy()
+                image2 = np.repeat(image2[:, :, np.newaxis], 3, axis=2)
+                projected_image, uv = viz_target_on_img(transformed_pt, K1, image2, r ,g, b)
+            else:
+                # 投影2D图像到另一个图像
+                hpr2 = Homo_Projector()
+                rotate_matrix = RTmatrix[:3, :3]
+                translation = RTmatrix[:3, 3]
+                projected_image, ret_status = hpr2.project_image(last_frame, frame, K0, K1, rotate_matrix, translation, mkpts0_3d_choosed.shape[0])
+                # 将last_frame的关键点mkpts0[choose_idx]也投影到frame上, 并与frame的mkpts1[choose_idx]连线,
+                # 线的颜色使用cm.jet(scores)
+                projected_mkpts0 = project_points(mkpts0_3d_choosed, rotate_matrix, translation, K0)
+                projected_mkpts0 = projected_mkpts0[:, :2].astype(int)
+                
+                
+                line_color = cm.jet(scores)[:, :3][:, ::-1]  # matplotlib RGB, opencv BGR, 同时注意, jet生成的是4位的颜色
+                for i in range(len(projected_mkpts0)):
+                    start_point = tuple(map(int, projected_mkpts0[i]))
+                    end_point = tuple(map(int, mkpts1[choose_idx][i]))
+                    cv2.line(projected_image, start_point, end_point, tuple(line_color[i]*255.), 2)
                         
             
             out = concat_image_v(out, projected_image)

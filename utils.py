@@ -162,6 +162,7 @@ matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
 import cv2
 import numpy as np
+
 def create_colorbar():
     plt.ioff()  # 关闭交互模式
     # 创建一个从0到1的线性间隔的数组，表示置信度的可能范围
@@ -198,7 +199,7 @@ def add_colorbar_to_image(image, colorbar):
     return combined_image
 
 
-def generate_bounding_box(image):
+def generate_bounding_box(image, choosed_value=1):
     """
     Generate 2D bounding box using points with pixel value of 1 in the image.
 
@@ -209,7 +210,7 @@ def generate_bounding_box(image):
         A tuple of (x_min, y_min, x_max, y_max) representing the bounding box coordinates.
     """
     # Find all 2d points with pixel value of 1
-    points = np.argwhere(image == 1)
+    points = np.argwhere(image == choosed_value)
     # Get the minimum and maximum x and y coordinates
     x_min = np.min(points[:, 1])
     y_min = np.min(points[:, 0])
@@ -232,7 +233,91 @@ def generate_bounding_box(image):
     x_max = min(image.shape[1], x_max)
     y_max = min(image.shape[0], y_max)
     # Return the modified bounding box
+    # rmin:rmax, cmin:cmax
+    # y_min:y_max, x_min:x_max
     return x_min, y_min, x_max, y_max
+
+
+# 输入depth, mask, K, 输出点云 
+def backproject_pts(depth, mask, K, sa=2048, norm_scale=1000.0):
+    # depth: 480x640
+    # mask: 480x640
+    # K: 3x3
+    # output: 3xN
+    xmap = np.array([[i for i in range(depth.shape[1])] for j in range(depth.shape[0])])
+    ymap = np.array([[j for i in range(depth.shape[1])] for j in range(depth.shape[0])])
+    cam_fx = K[0, 0]
+    cam_fy = K[1, 1]
+    cam_cx = K[0, 2]
+    cam_cy = K[1, 2]
+    cmin, rmin, cmax, rmax = generate_bounding_box(mask)
+    choose = mask[rmin:rmax, cmin:cmax].flatten().nonzero()[0]
+    if len(choose) > sa:
+        c_mask = np.zeros(len(choose), dtype=int)
+        c_mask[:sa] = 1
+        np.random.shuffle(c_mask)
+        choose = choose[c_mask.nonzero()]
+    else:
+        choose = np.pad(choose, (0, sa - len(choose)), 'wrap')
+    depth_masked = depth[rmin:rmax, cmin:cmax].flatten()[choose][:, np.newaxis]
+    xmap_masked = xmap[rmin:rmax, cmin:cmax].flatten()[choose][:, np.newaxis]
+    ymap_masked = ymap[rmin:rmax, cmin:cmax].flatten()[choose][:, np.newaxis]
+    pt2 = depth_masked / norm_scale
+    pt0 = (xmap_masked - cam_cx) * pt2 / cam_fx
+    pt1 = (ymap_masked - cam_cy) * pt2 / cam_fy
+    points = np.concatenate((pt0, pt1, pt2), axis=1)
+    return points
+
+
+def transform(g, a, normals=None):
+    """ Applies the SE3 transform
+
+    Args:
+        g: SE3 transformation matrix of size ([1,] 3/4, 4) or (B, 3/4, 4)
+        a: Points to be transformed (N, 3) or (B, N, 3)
+        normals: (Optional). If provided, normals will be transformed
+
+    Returns:
+        transformed points of size (N, 3) or (B, N, 3)
+
+    """
+    R = g[..., :3, :3]  # (B, 3, 3)
+    p = g[..., :3, 3]  # (B, 3)
+
+    if len(g.shape) == len(a.shape):
+        b = np.matmul(a, np.transpose(R, (0, 2, 1))) + p[..., None, :]
+    else:
+        raise NotImplementedError
+        b = R.matmul(a.unsqueeze(-1)).squeeze(-1) + p  # No batch. Not checked
+
+    if normals is not None:
+        rotated_normals = np.matmul(normals, np.transpose(R, axes=(-1, -2)))
+        return b, rotated_normals
+
+    else:
+        return b
+
+
+"""
+    input:
+        transform: (1, 3, 4)或(3, 4), torch.Tensor 
+                    包含(3, 3)的旋转矩阵rotation与(3, 1)的位移向量
+    output:
+        transform_inv (4, 4) numpy.ndarray  transform对应变换的逆变换矩阵
+"""
+def transform_inv(transform_input):
+    if len(transform_input.shape) == 3:
+        transform = transform_input.squeeze(0)
+    else:
+        transform = transform_input
+    transform = transform.cpu().numpy()
+    rotation = transform[:3, :3]
+    translation = transform[:3, 3]
+    transform_inv = np.identity(4, dtype=np.double)
+    rotation_inv = np.linalg.inv(rotation)
+    transform_inv[:3, :3] = rotation_inv
+    transform_inv[:3, 3] = rotation_inv @ ((-1.0) * translation)
+    return transform_inv[:3, :]
 
 
 def crop_image_by_bounding_box(bounding_box, image):

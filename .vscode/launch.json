@@ -15,10 +15,11 @@
             "args": ["--input", "/data4/cxx/dataset/desk_3/color/", 
                      "--input_depth", "/data4/cxx/dataset/desk_3/depth/", 
                      "--depth_match",
-                    //  "--input_mask", "/data4/cxx/dataset/desk_3/mask/",
-                    //  "--mask_foreground",
+                     "--input_mask", "/data4/cxx/dataset/desk_3/mask/",
+                     "--points_project",
+                     "--mask_foreground",
                     
-                     "--output_dir", "/data4/cxx/dataset/desk_3/output_no_mask/"
+                     "--output_dir", "/data4/cxx/dataset/desk_3/output_pts_fore/"
                      ] 
                     // 读取RGB-D数据并match
                     //  "--input", "/data4/cxx/dataset/desk_3/color/", 
