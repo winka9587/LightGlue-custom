@@ -31,7 +31,7 @@
   - [x] Only match keypoints in 2D bbox region.
   - [x] Only match keypoints in foreground region.
 
-- [ ] Project 3D pointcloud from image1 to image2
+- [x] Project 3D pointcloud from image1 to image2
 
 # Origin
 
