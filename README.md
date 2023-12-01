@@ -35,6 +35,16 @@
 
 - [x] Project 3D pointcloud from image1(depth) to image2
 
+  ```bash
+  # make sure the rgb, depth, mask images store in dependent folder and are sorted correctly
+  python demo_lightglue.py 
+          --input /path/to/rgb/
+          --input_depth /path/to/depth/
+          --depth_match
+          --input_mask /path/to/mask/
+          --points_project
+          --mask_foreground
+  ```
   <p align="center">
   <img src="assets/mask_foreground_project.gif" alt="example" width=80%>
   <br>
