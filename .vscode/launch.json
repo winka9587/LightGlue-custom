@@ -19,7 +19,7 @@
                      "--points_project",
                      "--mask_foreground",
                     
-                     "--output_dir", "/data4/cxx/dataset/desk_3/output_pts_fore/"
+                    //  "--output_dir", "/data4/cxx/dataset/desk_3/output_pts_fore/"
                      ] 
                     // 读取RGB-D数据并match
                     //  "--input", "/data4/cxx/dataset/desk_3/color/", 

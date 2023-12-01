@@ -158,7 +158,9 @@ def compute_rigid_transform(a: torch.Tensor, b: torch.Tensor, weights: torch.Ten
     return transform
 
 import matplotlib
-matplotlib.use('TkAgg')
+# setting for X11forward remote visualize
+# if report error, please check $DISPLAY environment variable
+matplotlib.use('TkAgg')  
 import matplotlib.pyplot as plt
 import cv2
 import numpy as np

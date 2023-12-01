@@ -24,14 +24,32 @@
   python demo_lightglue.py --input RGB_PATH --input_depth DEPTH_PATH --depth_match
   ```
   <p align="center">
-  <img src=".gif" alt="example" width=80%>
+  <img src="assets/depth_homo.gif" alt="example" width=80%>
+  <br>
+  <em>use matched 3D point-pairs estimate relative pose and reproject image(speed up)</em>
   </p>
 
 - [x] Accept mask input, and only use keypoints in mask region.
   - [x] Only match keypoints in 2D bbox region.
   - [x] Only match keypoints in foreground region.
 
-- [x] Project 3D pointcloud from image1 to image2
+- [x] Project 3D pointcloud from image1(depth) to image2
+
+  <p align="center">
+  <img src="assets/mask_foreground_project.gif" alt="example" width=80%>
+  <br>
+  <em>only use matched 3D point-pairs in mask foreground to estimate relative pose & project pointcloud(speed up)</em>
+  </p>
+
+- [ ] Accept model and init pose as input, transform model to camera coordinate by estimated pose.
+
+- [ ] custom choose different modules, like: matcher, relative pose estimate method, viz_type, project type
+
+- [ ] web-ui
+
+# Test
+
+- [ ] Run LightGlue on custom dataset, extract point-pair and extract region-pointcloud
 
 # Origin
 
